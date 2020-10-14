@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"log"
 	"os"
 	"path"
@@ -68,6 +69,8 @@ func (g *GetService) Get() error {
 		return err
 	}
 
+	chartPrefix := ""
+	chartPath := ""
 	index := search.NewIndex()
 	index.AddRepo(chartRepo.Config.Name, chartRepo.IndexFile, (g.allVersions || g.chartVersion != ""))
 	rexp := fmt.Sprintf("^.*%s.*", g.chartName)
@@ -84,6 +87,9 @@ func (g *GetService) Get() error {
 			continue
 		}
 		for _, u := range r.Chart.URLs {
+			urlParsed, _ := url.Parse(u)
+			chartPrefix, _ = path.Split(urlParsed.Path)
+
 			b, err := chartRepo.Client.Get(u)
 			if err != nil {
 				if g.ignoreErrors {
@@ -94,7 +100,11 @@ func (g *GetService) Get() error {
 				}
 			}
 			chartFileName := fmt.Sprintf("%s-%s.tgz", r.Chart.Name, r.Chart.Version)
-			chartPath := path.Join(g.config.Name, chartFileName)
+			if chartPrefix != "" {
+				chartPath = path.Join(g.config.Name, chartPrefix, chartFileName)
+			} else {
+				chartPath = path.Join(g.config.Name, chartFileName)
+			}
 			err = writeFile(chartPath, b.Bytes(), g.logger, g.ignoreErrors)
 			if err != nil {
 				return err
@@ -110,11 +120,24 @@ func (g *GetService) Get() error {
 }
 
 func writeFile(name string, content []byte, log *log.Logger, ignoreErrors bool) error {
-	err := ioutil.WriteFile(name, content, 0666)
-	if ignoreErrors {
-		log.Printf("cannot write files %s: %s", name, err)
-	} else {
-		return err
+	// Create required subfolders structure
+	err := os.MkdirAll(path.Dir(name), 0744)
+	if err != nil {
+	  if ignoreErrors {
+		  log.Printf("cannot create destination folder: %s", name, err)
+	  } else {
+		  return err
+	  }
+	}
+
+	// Write destination file
+	err = ioutil.WriteFile(name, content, 0666)
+	if err != nil {
+	  if ignoreErrors {
+		  log.Printf("cannot write files %s: %s", name, err)
+	  } else {
+		  return err
+	  }
 	}
 	return nil
 }
